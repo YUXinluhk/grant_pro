@@ -39,16 +39,32 @@
                 <div id="config-panel">
                     <h2 class="text-xl font-semibold border-b pb-3 mb-4">参数配置</h2>
                     <div class="space-y-4">
-                        <div>
-                            <label for="apiKey" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                            <input type="password" id="apiKey" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="输入您的API密钥">
+                        <div class="border-b border-gray-200 pb-4">
+                            <h3 class="text-md font-semibold text-gray-800 mb-2">API 连接配置</h3>
+                            <div>
+                                <label for="apiProvider" class="block text-sm font-medium text-gray-700 mb-1">选择模型提供商:</label>
+                                <select id="apiProvider" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="gemini_native">Google Gemini (原生)</option>
+                                    <option value="openrouter">OpenRouter</option>
+                                    <option value="openai_compatible">OpenAI 兼容 API (如本地模型, 其他代理)</option>
+                                    <option value="custom">自定义 (需要API Base URL)</option>
+                                </select>
+                            </div>
+                            <div class="mt-3">
+                                <label for="apiKey" id="apiKeyLabel" class="block text-sm font-medium text-gray-700 mb-1">API Key:</label>
+                                <input type="password" id="apiKey" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="输入您的API密钥">
+                            </div>
+                            <div id="apiBaseUrlContainer" class="mt-3">
+                                <label for="apiBaseUrl" id="apiBaseUrlLabel" class="block text-sm font-medium text-gray-700 mb-1">API Base URL:</label>
+                                <input type="text" id="apiBaseUrl" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如: https://api.openai.com/v1">
+                            </div>
+                            <button id="fetchModelsButton" class="mt-4 w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                                连接并获取模型
+                            </button>
+                            <div id="connectivityStatus" class="text-sm mt-2 min-h-[1.25em]"></div>
                         </div>
                         <div>
-                            <label for="apiBaseUrl" class="block text-sm font-medium text-gray-700 mb-1">API Base URL (可选)</label>
-                            <input type="text" id="apiBaseUrl" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如: https://api.openrouter.ai/api/v1">
-                        </div>
-                        <div>
-                            <label for="initialPrompt" class="block text-sm font-medium text-gray-700 mb-1">初步研究构想</label>
+                            <label for="initialPrompt" class="block text-sm font-medium text-gray-700 mb-1 pt-2">初步研究构想</label>
                             <textarea id="initialPrompt" rows="5" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="输入您的研究构想...">我想研究蛋白质X和疾病Y之间的关系，特别关注其在细胞信号通路中的作用机制。</textarea>
                         </div>
                         <div>
@@ -146,9 +162,18 @@
         let researchField = '通用领域';
 
         const elements = {
+            // Existing elements
             apiKey: document.getElementById('apiKey'),
             apiBaseUrl: document.getElementById('apiBaseUrl'),
             initialPrompt: document.getElementById('initialPrompt'),
+            // New elements for provider selection
+            apiProvider: document.getElementById('apiProvider'),
+            apiKeyLabel: document.getElementById('apiKeyLabel'),
+            apiBaseUrlContainer: document.getElementById('apiBaseUrlContainer'),
+            apiBaseUrlLabel: document.getElementById('apiBaseUrlLabel'),
+            fetchModelsButton: document.getElementById('fetchModelsButton'),
+            connectivityStatus: document.getElementById('connectivityStatus'),
+            // Continuing existing elements
             mainLlm: document.getElementById('mainLlm'),
             knowledgeLlm: document.getElementById('knowledgeLlm'),
             workflowButton: document.getElementById('workflowButton'),
@@ -194,7 +219,9 @@
                 endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
                 body = { contents: [{ parts: [{ text: prompt }] }] };
             } else {
-                if (!apiBaseUrl) throw new Error("使用非Google原生模型时，必须提供API Base URL。");
+                // This path is taken if modelName is not 'gemini-' OR if apiBaseUrl is provided.
+                // If apiBaseUrl is NOT provided here, it means a non-Gemini model was chosen without a required Base URL.
+                if (!apiBaseUrl) throw new Error("此模型配置需要 API Base URL，但未提供。");
                 endpoint = `${apiBaseUrl.replace(/\/$/, '')}/chat/completions`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 body = { model: modelName, messages: [{ role: 'user', content: prompt }] };
@@ -363,7 +390,11 @@
         };
 
         function populateModelSelect(selectElement, modelGroups) {
-            selectElement.innerHTML = '';
+            selectElement.innerHTML = ''; // Clear existing options first
+            if (!modelGroups || modelGroups.length === 0) {
+                selectElement.innerHTML = '<option value="">无可用模型</option>';
+                return;
+            }
             modelGroups.forEach(group => {
                 const optgroup = document.createElement('optgroup');
                 optgroup.label = group.group;
@@ -375,43 +406,164 @@
                 });
                 selectElement.appendChild(optgroup);
             });
+             if (selectElement.options.length === 0) { // Should not happen if modelGroups is not empty, but as a safeguard
+                selectElement.innerHTML = '<option value="">无可用模型</option>';
+            }
         }
 
-        async function fetchAndUpdateModels() {
+        // fetchAndUpdateModels function is now removed as its functionality is superseded by handleFetchModels.
+
+        // elements.apiBaseUrl.addEventListener('blur', fetchAndUpdateModels); // This event listener is removed.
+
+        function updateProviderUI() {
+            const selectedProvider = elements.apiProvider.value;
+
+            // Clear model lists and status
+            const placeholderOption = '<option value="">请先连接并获取模型</option>';
+            elements.mainLlm.innerHTML = placeholderOption;
+            elements.knowledgeLlm.innerHTML = placeholderOption;
+            elements.connectivityStatus.textContent = '';
+
+            switch (selectedProvider) {
+                case 'gemini_native':
+                    elements.apiKeyLabel.textContent = 'Google API Key:';
+                    elements.apiKey.placeholder = '输入您的 Google API 密钥';
+                    elements.apiBaseUrlContainer.classList.add('hidden');
+                    elements.apiBaseUrl.value = ''; // Clear any previous value
+                    break;
+                case 'openrouter':
+                    elements.apiKeyLabel.textContent = 'OpenRouter API Key:';
+                    elements.apiKey.placeholder = '输入您的 OpenRouter API 密钥 (sk-or-...)';
+                    elements.apiBaseUrlContainer.classList.remove('hidden');
+                    elements.apiBaseUrlLabel.textContent = 'OpenRouter API Base URL:';
+                    elements.apiBaseUrl.value = 'https://openrouter.ai/api/v1';
+                    elements.apiBaseUrl.placeholder = 'https://openrouter.ai/api/v1';
+                    break;
+                case 'openai_compatible':
+                    elements.apiKeyLabel.textContent = 'API Key (可选):';
+                    elements.apiKey.placeholder = '如果需要，请输入API Key';
+                    elements.apiBaseUrlContainer.classList.remove('hidden');
+                    elements.apiBaseUrlLabel.textContent = '兼容 API Base URL:';
+                    elements.apiBaseUrl.value = '';
+                    elements.apiBaseUrl.placeholder = '例如: http://localhost:1234/v1';
+                    break;
+                case 'custom':
+                    elements.apiKeyLabel.textContent = 'API Key:';
+                    elements.apiKey.placeholder = '输入您的 API Key';
+                    elements.apiBaseUrlContainer.classList.remove('hidden');
+                    elements.apiBaseUrlLabel.textContent = '自定义 API Base URL:';
+                    elements.apiBaseUrl.value = '';
+                    elements.apiBaseUrl.placeholder = '输入完整的 API Base URL';
+                    break;
+                default:
+                    elements.apiKeyLabel.textContent = 'API Key:';
+                    elements.apiBaseUrlContainer.classList.add('hidden');
+            }
+        }
+
+        elements.apiProvider.addEventListener('change', updateProviderUI);
+
+        async function handleFetchModels() {
+            const provider = elements.apiProvider.value;
             const apiKey = elements.apiKey.value.trim();
             const apiBaseUrl = elements.apiBaseUrl.value.trim();
-            if (!apiBaseUrl || !apiKey) {
-                populateModelSelect(elements.mainLlm, defaultModels.main);
-                populateModelSelect(elements.knowledgeLlm, defaultModels.knowledge);
-                return;
-            }
 
-            log(`正在从 ${apiBaseUrl} 获取模型列表...`);
-            elements.mainLlm.innerHTML = `<option>正在获取...</option>`;
-            elements.knowledgeLlm.innerHTML = `<option>正在获取...</option>`;
+            elements.connectivityStatus.textContent = '正在检查连接并获取模型...';
+            elements.connectivityStatus.classList.remove('text-red-500', 'text-green-500');
+            elements.connectivityStatus.classList.add('text-blue-500');
+
+            // Clear previous models
+            elements.mainLlm.innerHTML = '<option value="">获取中...</option>';
+            elements.knowledgeLlm.innerHTML = '<option value="">获取中...</option>';
 
             try {
-                const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/models`, {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
-                });
-                if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
-                const data = await response.json();
-                const fetchedModels = data.data.map(m => m.id);
+                let fetchedModels = [];
+                let modelGroups = [];
 
-                const modelGroups = [{ group: "Fetched Models", models: fetchedModels }];
-                populateModelSelect(elements.mainLlm, modelGroups);
-                populateModelSelect(elements.knowledgeLlm, modelGroups);
-                log(`✅ 成功获取 ${fetchedModels.length} 个模型。`);
+                switch (provider) {
+                    case 'gemini_native':
+                        if (!apiKey) {
+                            throw new Error("Google API Key 未提供。");
+                        }
+                        // For native Gemini, we don't fetch from an endpoint, we use predefined defaults.
+                        // Filter defaultModels for Gemini entries.
+                        const geminiMainModels = defaultModels.main.find(group => group.group.toLowerCase().includes("gemini"));
+                        const geminiKnowledgeModels = defaultModels.knowledge.find(group => group.group.toLowerCase().includes("gemini"));
+
+                        if (geminiMainModels) modelGroups.push(geminiMainModels);
+                        // Add other default groups too, or just Gemini? For now, let's assume only Gemini for this provider.
+                        populateModelSelect(elements.mainLlm, geminiMainModels ? [geminiMainModels] : []);
+                        populateModelSelect(elements.knowledgeLlm, geminiKnowledgeModels ? [geminiKnowledgeModels] : []);
+
+                        elements.connectivityStatus.textContent = '已选择 Gemini (原生)。默认模型已加载。';
+                        elements.connectivityStatus.classList.add('text-green-500');
+                        return; // Exit early
+
+                    case 'openrouter':
+                    case 'openai_compatible':
+                    case 'custom':
+                        if (!apiBaseUrl) {
+                            throw new Error("API Base URL 未提供。");
+                        }
+                        // For OpenRouter and OpenAI compatible, API key might be optional for some local LLMs
+                        if ((provider === 'openrouter' || provider === 'custom') && !apiKey) {
+                             // OpenRouter and typically custom setups would require an API key.
+                            throw new Error("API Key 未提供。");
+                        }
+
+                        const modelsUrl = `${apiBaseUrl.replace(/\/$/, '')}/models`;
+                        const headers = { 'Authorization': `Bearer ${apiKey}` };
+
+                        const response = await fetch(modelsUrl, apiKey ? { headers } : {}); // Don't send auth header if no API key (for truly open local LLMs)
+
+                        if (!response.ok) {
+                            const errorData = await response.text();
+                            throw new Error(`获取模型列表失败: ${response.status} - ${errorData}`);
+                        }
+                        const data = await response.json();
+                        // Standard OpenAI format is data.data, OpenRouter also uses data.data
+                        if (data && data.data && Array.isArray(data.data)) {
+                            fetchedModels = data.data.map(m => m.id).sort();
+                        } else {
+                            // Fallback for non-standard list, e.g. some local LLMs might return a flat list or { "models": [] }
+                            // This part might need adjustment based on actual non-standard API responses.
+                            // For now, we'll assume it's an array of strings if not data.data
+                            if (Array.isArray(data)) { // Simple list of strings
+                                fetchedModels = data.map(m => typeof m === 'string' ? m : m.id).sort();
+                            } else if (data.models && Array.isArray(data.models)){ // like { models: ["id1", "id2"]}
+                                fetchedModels = data.models.map(m => typeof m === 'string' ? m : m.id).sort();
+                            } else {
+                                console.warn("Model list response format not standard OpenAI. Full response:", data);
+                                throw new Error("获取到的模型列表格式不识别。请检查API响应。");
+                            }
+                        }
+
+                        if (fetchedModels.length === 0) {
+                           throw new Error("API返回了空模型列表。");
+                        }
+
+                        modelGroups = [{ group: `来自 ${provider} 的模型`, models: fetchedModels }];
+                        populateModelSelect(elements.mainLlm, modelGroups);
+                        populateModelSelect(elements.knowledgeLlm, modelGroups);
+                        elements.connectivityStatus.textContent = `连接成功！获取了 ${fetchedModels.length} 个模型。`;
+                        elements.connectivityStatus.classList.add('text-green-500');
+                        break;
+                    default:
+                        throw new Error("未知的API提供商。");
+                }
             } catch (error) {
                 logError(error.message);
-                elements.mainLlm.innerHTML = `<option>获取失败</option>`;
-                elements.knowledgeLlm.innerHTML = `<option>获取失败</option>`;
+                elements.connectivityStatus.textContent = `错误: ${error.message}`;
+                elements.connectivityStatus.classList.add('text-red-500');
+                // Fallback to default models on error
                 populateModelSelect(elements.mainLlm, defaultModels.main);
                 populateModelSelect(elements.knowledgeLlm, defaultModels.knowledge);
+            } finally {
+                 elements.connectivityStatus.classList.remove('text-blue-500');
             }
         }
 
-        elements.apiBaseUrl.addEventListener('blur', fetchAndUpdateModels);
+        elements.fetchModelsButton.addEventListener('click', handleFetchModels);
 
         elements.tabButtons.forEach(button => {
             button.addEventListener('click', () => {
@@ -608,7 +760,8 @@
         window.onload = () => {
             populatePrompts();
             updateKnowledgeBaseStatus(localStorage.getItem('knowledgeBase'));
-            fetchAndUpdateModels(); // Initial model population
+            updateProviderUI(); // Set initial UI state for the default provider
+            // fetchAndUpdateModels() is removed. Model fetching is now user-triggered.
         };
 
     </script>
