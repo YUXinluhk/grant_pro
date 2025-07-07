@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Marked.js for rendering Markdown output -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    
+
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .prose h1, .prose h2, .prose h3 { color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
@@ -163,7 +163,7 @@
             revisionControls: document.getElementById('revision-controls'),
             reviseButton: document.getElementById('reviseButton'),
             finishRevisionButton: document.getElementById('finishRevisionButton'),
-            roadmapContainer: document.getElementById('roadmap-container'),
+            // roadmapContainer was unused and the ID did not exist in HTML.
             roadmapOutput: document.getElementById('roadmapOutput'),
             tabButtons: document.querySelectorAll('.tab-btn'),
             tabContents: document.querySelectorAll('.tab-content'),
@@ -203,20 +203,65 @@
             try {
                 const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(`API Error: ${response.status} - ${errorData.error?.message || JSON.stringify(errorData)}`);
+                    let errorDataMessage = `HTTP status ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        // Attempt to extract a meaningful message from various possible error structures
+                        errorDataMessage = errorData?.error?.message || // Standard OpenAI, Google, some OpenRouter
+                                         errorData?.error?.type ||    // Some OpenRouter (e.g., Anthropic)
+                                         errorData?.message ||        // Direct message property
+                                         JSON.stringify(errorData);   // Fallback to stringifying the whole error object
+                    } catch (e) {
+                        // If response body isn't JSON or JSON parsing fails
+                        try {
+                            const errorText = await response.text();
+                            errorDataMessage = `${response.statusText || 'Error'}: ${errorText || '(No further error details in response body)'}`;
+                        } catch (textErr) {
+                             // Fallback if reading response.text() also fails
+                             errorDataMessage = `${response.statusText || 'Error'} (Could not parse error response body and failed to read as text)`;
+                        }
+                    }
+                    throw new Error(`API Error (${modelName}): ${response.status} - ${errorDataMessage}`);
                 }
-                const data = await response.json();
-                if (modelName.startsWith('gemini-') && !apiBaseUrl) {
-                    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                const data = await response.json(); // Assuming response.ok means data is valid JSON
+
+                if (modelName.startsWith('gemini-') && !apiBaseUrl) { // Native Gemini call
+                    const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (typeof textContent === 'undefined') {
+                        logError(`Gemini API (${modelName}) returned a 200 OK but the expected content is missing. Full response: ${JSON.stringify(data)}`);
+                        if (data.promptFeedback && data.promptFeedback.blockReason) {
+                             throw new Error(`Gemini API request to ${modelName} was blocked due to: ${data.promptFeedback.blockReason}. Safety ratings: ${JSON.stringify(data.promptFeedback.safetyRatings)}`);
+                        }
+                        throw new Error(`Gemini API call to ${modelName} was successful (200 OK) but no valid content was found in the response.`);
+                    }
+                    return textContent;
+                } else { // OpenAI-compatible or other proxied models
+                    const messageContent = data.choices?.[0]?.message?.content;
+                    if (typeof messageContent === 'undefined') {
+                        logError(`Compatible API (${modelName}) returned a 200 OK but the expected content (choices[0].message.content) is missing. Full response: ${JSON.stringify(data)}`);
+                        if (data.choices && data.choices.length > 0 && data.choices[0].finish_reason) {
+                            throw new Error(`Compatible API call to ${modelName} (200 OK) finished with reason '${data.choices[0].finish_reason}' but no content was returned.`);
+                        }
+                        if (data.error) { // Some APIs might return 200 OK with an error object in the body
+                             throw new Error(`Compatible API call to ${modelName} (200 OK) returned an error object in the response body: ${data.error.message || JSON.stringify(data.error)}`);
+                        }
+                        throw new Error(`Compatible API call to ${modelName} was successful (200 OK) but no valid content was found in the response.`);
+                    }
+                    return messageContent;
                 }
-                return data.choices?.[0]?.message?.content || "";
             } catch (error) {
-                logError(`Model call failed: ${error.message}`);
-                throw error;
+                // This catches:
+                // 1. Network errors from fetch itself (e.g., DNS failure, server unreachable).
+                // 2. Errors from response.json() if the response body isn't valid JSON (e.g. HTML error page).
+                // 3. Errors explicitly thrown from the blocks above (e.g., !response.ok, missing content).
+                const originalErrorMessage = error.message;
+                // Add modelName to the error if not already present for easier debugging from logs.
+                const finalErrorMessage = originalErrorMessage.includes(modelName) ? originalErrorMessage : `Model call failed for ${modelName}: ${originalErrorMessage}`;
+                logError(finalErrorMessage); // Log the detailed error.
+                throw new Error(finalErrorMessage); // Re-throw to be caught by runWorkflow.
             }
         }
-        
+
         function getPromptWithState(promptText, state, knowledgeBaseContent) {
             let finalPrompt = promptText;
             if (knowledgeBaseContent) {
@@ -254,8 +299,14 @@
                     logError(`处理文件 ${file.name} 失败: ${e.message}`);
                 }
             }
-            localStorage.setItem('knowledgeBase', combinedText);
-            updateKnowledgeBaseStatus(combinedText);
+            try {
+                localStorage.setItem('knowledgeBase', combinedText);
+                updateKnowledgeBaseStatus(combinedText);
+            } catch (e) {
+                logError(`存储知识库失败 (Failed to save knowledge base): ${e.message}. 可能已超出浏览器存储限制。`);
+                // Optionally, revert to previous state or clear if appropriate
+                // For now, just log the error. The UI might be out of sync if this fails.
+            }
         });
 
         async function parsePdf(file) {
@@ -287,7 +338,7 @@
                 elements.promptsContainer.appendChild(promptDiv);
             }
         }
-        
+
         function getCurrentPrompts() {
             const currentPrompts = {};
             for (const key in PROMPTS) {
@@ -325,7 +376,7 @@
                 selectElement.appendChild(optgroup);
             });
         }
-        
+
         async function fetchAndUpdateModels() {
             const apiKey = elements.apiKey.value.trim();
             const apiBaseUrl = elements.apiBaseUrl.value.trim();
@@ -346,7 +397,7 @@
                 if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
                 const data = await response.json();
                 const fetchedModels = data.data.map(m => m.id);
-                
+
                 const modelGroups = [{ group: "Fetched Models", models: fetchedModels }];
                 populateModelSelect(elements.mainLlm, modelGroups);
                 populateModelSelect(elements.knowledgeLlm, modelGroups);
@@ -361,7 +412,7 @@
         }
 
         elements.apiBaseUrl.addEventListener('blur', fetchAndUpdateModels);
-        
+
         elements.tabButtons.forEach(button => {
             button.addEventListener('click', () => {
                 elements.tabButtons.forEach(btn => btn.classList.remove('active'));
@@ -431,13 +482,30 @@
                 const prompt = getPromptWithState(getCurrentPrompts().title_abstract, graphState);
                 const jsonStr = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
                 try {
-                    const jsonMatch = jsonStr.match(/```json\n([\s\S]*?)\n```/);
-                    const parsed = JSON.parse(jsonMatch ? jsonMatch[1] : jsonStr);
-                    graphState.final_title = parsed.title;
-                    graphState.final_abstract = parsed.abstract;
+                    let contentToParse = jsonStr.trim();
+                    const jsonMatch = contentToParse.match(/```json\n([\s\S]*?)\n```/);
+
+                    if (jsonMatch && jsonMatch[1]) {
+                        contentToParse = jsonMatch[1].trim();
+                    } else if (contentToParse.startsWith('{') && contentToParse.endsWith('}')) {
+                        // Content already looks like a raw JSON object, use as is.
+                    } else {
+                        // Output is neither a recognized JSON markdown block nor a string that looks like a JSON object.
+                        throw new Error("LLM output for title/abstract was not in the expected JSON format or a JSON markdown block.");
+                    }
+
+                    const parsed = JSON.parse(contentToParse);
+
+                    if (parsed && typeof parsed.title === 'string' && typeof parsed.abstract === 'string') {
+                        graphState.final_title = parsed.title;
+                        graphState.final_abstract = parsed.abstract;
+                    } else {
+                        throw new Error("Parsed JSON for title/abstract does not contain valid 'title' (string) and 'abstract' (string) properties.");
+                    }
                 } catch(e) {
-                    graphState.final_title = "未能生成标题";
-                    graphState.final_abstract = jsonStr;
+                    logError(`标题/摘要JSON解析失败 (Title/Abstract JSON parsing failed): ${e.message}. Raw LLM output was: "${jsonStr}"`);
+                    graphState.final_title = "标题生成失败";
+                    graphState.final_abstract = "摘要生成失败，请检查执行日志中的原始输出。";
                 }
                 updateReportOutput(`<h2>${graphState.final_title}</h2>\n\n<h3>摘要</h3>\n\n<p>${graphState.final_abstract}</p>`);
                 log("✅ '标题和摘要' 完成。请确认后继续。");
@@ -445,7 +513,11 @@
             async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
                 log("步骤 8: 执行 '技术路线图'...");
                 document.querySelector('[data-tab="roadmap"]').click();
-                const researchContent = `研究内容:\n${graphState.literature_review_draft}\n\n研究方案:\n${graphState.research_plan_draft}`;
+                // After revision steps (6 and user finalization), graphState.literature_review_draft
+                // is expected to hold the complete revised body of the proposal.
+                // graphState.research_plan_draft and graphState.innovation_draft are cleared at that stage.
+                // So, the technical roadmap should be based on the consolidated content in graphState.literature_review_draft.
+                const researchContent = graphState.literature_review_draft;
                 let prompt = getCurrentPrompts().technical_roadmap.replace('[RESEARCH_CONTENT]', researchContent);
                 const svgCode = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
                 elements.roadmapOutput.innerHTML = svgCode;
@@ -460,17 +532,17 @@
                 knowledgeLlm: elements.knowledgeLlm.value,
                 apiBaseUrl: elements.apiBaseUrl.value.trim()
             };
-            
+
             if (!apiKey || (!elements.initialPrompt.value.trim() && currentStep === 0)) {
                 logError("错误：API密钥和研究构想不能为空。");
                 return;
             }
 
             toggleLoading(true, '确认并继续');
-            
+
             try {
                 await workflowSteps[currentStep](apiKey, mainLlm, knowledgeLlm, apiBaseUrl);
-                
+
                 if (currentStep === 5) { // Just finished AI Review
                     currentStep = 6; // Set state to be ready for revision
                     toggleLoading(false);
@@ -491,7 +563,7 @@
                 toggleLoading(false, '流程失败，请重试');
             }
         }
-        
+
         elements.workflowButton.addEventListener('click', () => {
              if (currentStep === 0) {
                 graphState = { initial_prompt: elements.initialPrompt.value.trim() };
@@ -518,16 +590,17 @@
                 elements.finishRevisionButton.disabled = false;
             }
         });
-        
+
         elements.finishRevisionButton.addEventListener('click', () => {
             elements.revisionControls.classList.add('hidden');
             elements.workflowButton.classList.remove('hidden');
-            currentStep = 7; 
+            currentStep = 7;
             // Before moving on, save the final edited text to graphState
             const finalEditorContent = document.getElementById('editor')?.value;
             if (finalEditorContent) {
-                 graphState.literature_review_draft = finalEditorContent; 
-                 // A more robust solution would parse the sections, but this is a simple approximation
+                 // Save the final editor content, which is the consolidated proposal body,
+                 // into graphState.literature_review_draft.
+                 graphState.literature_review_draft = finalEditorContent;
             }
             runWorkflow();
         });
