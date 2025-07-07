@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基金申报书AI撰写助手 V4 (布局优化版)</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Marked.js for rendering Markdown output -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .prose h1, .prose h2, .prose h3 { color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
+        .prose p { line-height: 1.7; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        details > summary { cursor: pointer; }
+        .control-panel button { transition: all 0.2s ease-in-out; }
+        .control-panel button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .tab-btn { transition: all 0.2s ease; }
+        .tab-btn.active { border-color: #3b82f6; color: #3b82f6; background-color: #eff6ff; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">基金申报书多智能体撰写系统 V4</h1>
+            <p class="mt-3 text-lg text-gray-600">动态模型加载 · 迭代式工作流 · 专业布局</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+            <!-- Left Column: Inputs and Controls -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-lg border border-gray-200 space-y-6 self-start">
+                <div id="config-panel">
+                    <h2 class="text-xl font-semibold border-b pb-3 mb-4">参数配置</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="apiKey" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <input type="password" id="apiKey" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="输入您的API密钥">
+                        </div>
+                        <div>
+                            <label for="apiBaseUrl" class="block text-sm font-medium text-gray-700 mb-1">API Base URL (可选)</label>
+                            <input type="text" id="apiBaseUrl" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如: https://api.openrouter.ai/api/v1">
+                        </div>
+                        <div>
+                            <label for="initialPrompt" class="block text-sm font-medium text-gray-700 mb-1">初步研究构想</label>
+                            <textarea id="initialPrompt" rows="5" class="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="输入您的研究构想...">我想研究蛋白质X和疾病Y之间的关系，特别关注其在细胞信号通路中的作用机制。</textarea>
+                        </div>
+                        <div>
+                            <h3 class="text-md font-medium text-gray-700 mb-2">模型选择</h3>
+                            <div class="space-y-3">
+                                <div>
+                                    <label for="mainLlm" class="block text-sm text-gray-600">核心模型 (用于创作和分析)</label>
+                                    <select id="mainLlm" class="w-full mt-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                                </div>
+                                <div>
+                                    <label for="knowledgeLlm" class="block text-sm text-gray-600">知识模型 (用于文献综述)</label>
+                                    <select id="knowledgeLlm" class="w-full mt-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="space-y-3">
+                            <h3 class="text-md font-medium text-gray-700">知识库管理</h3>
+                            <div>
+                                <label for="fileUpload" class="block text-sm text-gray-600 mb-1">上传文件 (txt, md, pdf)</label>
+                                <input type="file" id="fileUpload" multiple accept=".txt,.md,.text,.pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                            </div>
+                            <div id="knowledgeBaseStatus" class="text-xs text-gray-500 p-2 bg-gray-100 rounded-md">知识库为空。</div>
+                            <button id="clearKnowledgeBase" class="w-full text-sm bg-red-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-red-600">清除知识库</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Outputs -->
+            <div class="lg:col-span-3 bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                <!-- MOVED: Workflow Control Panel -->
+                <div id="control-panel" class="control-panel space-y-3 pb-6 mb-6 border-b-2 border-dashed">
+                     <h2 class="text-xl font-semibold">工作流程控制</h2>
+                     <button id="workflowButton" class="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 flex items-center justify-center">
+                        <span id="buttonText">开始流程</span>
+                        <div id="loader" class="loader hidden ml-3"></div>
+                    </button>
+                    <div id="revision-controls" class="hidden space-y-3">
+                        <h3 class="text-md font-semibold text-center text-orange-600">进入修订模式</h3>
+                        <p class="text-sm text-gray-600">您现在可以直接在下方报告区修改草稿。完成后，可多次点击“优化”进行迭代，或在满意后点击“完成”继续下一步。</p>
+                        <button id="reviseButton" class="w-full bg-orange-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-orange-600">迭代优化当前草稿</button>
+                        <button id="finishRevisionButton" class="w-full bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-700">完成修订，继续生成终稿</button>
+                    </div>
+                </div>
+
+                <!-- Tab Navigation -->
+                <div class="border-b border-gray-200">
+                    <nav class="-mb-px flex space-x-6" aria-label="Tabs">
+                        <button class="tab-btn active whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm" data-tab="report">报告/编辑区</button>
+                        <button class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" data-tab="prompts">Prompts</button>
+                        <button class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" data-tab="logs">执行日志</button>
+                        <button class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" data-tab="roadmap">技术路线图</button>
+                    </nav>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="mt-6">
+                    <div class="tab-content" id="tab-report">
+                        <div id="reportOutput" class="prose max-w-none h-[65vh] overflow-y-auto bg-gray-50 p-4 rounded-lg border border-gray-200">报告内容将在此处显示。</div>
+                    </div>
+                    <div class="tab-content hidden" id="tab-prompts">
+                        <div id="promptsContainer" class="space-y-4 h-[65vh] overflow-y-auto"></div>
+                    </div>
+                    <div class="tab-content hidden" id="tab-logs">
+                        <div id="logOutput" class="h-[65vh] bg-gray-900 text-white font-mono text-sm p-4 rounded-lg overflow-y-auto border border-gray-700">请先配置参数并点击“开始流程”...</div>
+                    </div>
+                    <div class="tab-content hidden" id="tab-roadmap">
+                        <div id="roadmapOutput" class="w-full h-[65vh] overflow-auto bg-gray-50 p-4 rounded-lg border border-gray-200 flex justify-center items-center"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer class="text-center mt-8 text-sm text-gray-500">
+            <p>由多模型AI驱动的前端应用</p>
+        </footer>
+    </div>
+
+    <script type="module">
+        import * as pdfjsLib from "https://mozilla.github.io/pdf.js/build/pdf.mjs";
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://mozilla.github.io/pdf.js/build/pdf.worker.mjs`;
+
+        const PROMPTS = {
+            clarify_objectives: `##Role:\nI am a professor in the field of [FIELD], with many years of deep cultivation in this field, and I have a wealth of academic knowledge and research experience. I am proficient in Chinese writing, grammar rules and format specifications, and I am good at writing grant proposals for research funds.\n\n##Goals:\nAccording to the user's topic selection, help them write the "research content, research objectives, and key scientific issues to be solved" part of the fund application, and fully reflect the innovation and feasibility of the project, so as to get the approval of review experts.`,
+            literature_review: `##Role:\nI am a professor in the field of [FIELD].\n\n##Goals:\nAccording to the user's topic selection AND the provided knowledge base, help them write the "Basis for Project Establishment" part. Fully reflect the scientificity, innovation and necessity of the project.`,
+            research_plan: `##Role:\nI am a professor in the field of [FIELD].\n\n##Goals:\nAccording to the user's topic selection, help them write the "Proposed Research Plan and Feasibility Analysis" part.`,
+            innovation: `##Role:\nI am a professor in the field of [FIELD].\n\n##Goals:\nHelp them write the "Features and Innovations of this Project" part.`,
+            reviser: `##Role:\nI am an expert editor. My goal is to revise the provided drafts based on the user's direct edits and the AI reviewer's feedback. I will integrate the suggestions to produce a more polished and coherent version. I will output the complete, revised text for all sections that were modified.\n\n## AI Reviewer Feedback:\n[REVIEW_FEEDBACK]\n\n## User's Revised Drafts:\n[USER_DRAFTS]`,
+            reviewer: `##Role:\nI am a professor in the field of [FIELD] and an experienced fund review expert.\n\n##Goals:\nFor the user's Chinese grant proposal draft, as a fund review expert, I will help with the pre-review, point out the problems and improvement suggestions of each part of the application.`,
+            title_abstract: `##Role:\nI am a professor in the field of [FIELD].\n\n##Goals:\nFormulate the "title" and "abstract" of the fund application. Your output MUST be a JSON object with two keys: "title" and "abstract".`,
+            technical_roadmap: `##Role:\nI am a professor in the field of [FIELD], specializing in creating clear, professional technical roadmaps for grant proposals.\n\n##Goals:\nBased on the provided final research content, generate a technical roadmap. The roadmap should be structured logically, highlighting key stages, methods, and expected outcomes to demonstrate the project's feasibility and innovation.\n\n##Requirements:\n- The output must be a single, complete SVG code block. Do not wrap it in HTML or markdown.\n- The SVG should be visually clean, using simple shapes (rectangles, arrows) and a clear hierarchy.\n- Use a professional, low-saturation color scheme.\n- Ensure text is legible and fits within the shapes.\n- The overall structure should logically flow from the research objectives to the final outcome.\n\n##Final Research Content:\n[RESEARCH_CONTENT]`
+        };
+
+        let graphState = {};
+        let currentStep = 0;
+        let researchField = '通用领域';
+
+        const elements = {
+            apiKey: document.getElementById('apiKey'),
+            apiBaseUrl: document.getElementById('apiBaseUrl'),
+            initialPrompt: document.getElementById('initialPrompt'),
+            mainLlm: document.getElementById('mainLlm'),
+            knowledgeLlm: document.getElementById('knowledgeLlm'),
+            workflowButton: document.getElementById('workflowButton'),
+            logOutput: document.getElementById('logOutput'),
+            reportOutput: document.getElementById('reportOutput'),
+            loader: document.getElementById('loader'),
+            buttonText: document.getElementById('buttonText'),
+            fileUpload: document.getElementById('fileUpload'),
+            knowledgeBaseStatus: document.getElementById('knowledgeBaseStatus'),
+            clearKnowledgeBase: document.getElementById('clearKnowledgeBase'),
+            promptsContainer: document.getElementById('promptsContainer'),
+            revisionControls: document.getElementById('revision-controls'),
+            reviseButton: document.getElementById('reviseButton'),
+            finishRevisionButton: document.getElementById('finishRevisionButton'),
+            roadmapContainer: document.getElementById('roadmap-container'),
+            roadmapOutput: document.getElementById('roadmapOutput'),
+            tabButtons: document.querySelectorAll('.tab-btn'),
+            tabContents: document.querySelectorAll('.tab-content'),
+        };
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            elements.logOutput.innerHTML += `<div><span class="text-gray-500">${timestamp}</span>: <span class="text-green-400">${message}</span></div>`;
+            elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
+        }
+        function logError(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            elements.logOutput.innerHTML += `<div><span class="text-gray-500">${timestamp}</span>: <span class="text-red-400">${message}</span></div>`;
+            elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
+        }
+        function toggleLoading(isLoading, text = '开始流程') {
+            elements.workflowButton.disabled = isLoading;
+            elements.buttonText.textContent = isLoading ? 'AI正在工作中...' : text;
+            elements.loader.classList.toggle('hidden', !isLoading);
+        }
+
+        async function callLlm(prompt, modelName, apiKey, apiBaseUrl) {
+            let endpoint = '';
+            let headers = { 'Content-Type': 'application/json' };
+            let body = {};
+
+            if (modelName.startsWith('gemini-') && !apiBaseUrl) {
+                endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+                body = { contents: [{ parts: [{ text: prompt }] }] };
+            } else {
+                if (!apiBaseUrl) throw new Error("使用非Google原生模型时，必须提供API Base URL。");
+                endpoint = `${apiBaseUrl.replace(/\/$/, '')}/chat/completions`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                body = { model: modelName, messages: [{ role: 'user', content: prompt }] };
+            }
+
+            try {
+                const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API Error: ${response.status} - ${errorData.error?.message || JSON.stringify(errorData)}`);
+                }
+                const data = await response.json();
+                if (modelName.startsWith('gemini-') && !apiBaseUrl) {
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                }
+                return data.choices?.[0]?.message?.content || "";
+            } catch (error) {
+                logError(`Model call failed: ${error.message}`);
+                throw error;
+            }
+        }
+        
+        function getPromptWithState(promptText, state, knowledgeBaseContent) {
+            let finalPrompt = promptText;
+            if (knowledgeBaseContent) {
+                finalPrompt = `Please refer to the following knowledge base content:\n\n<knowledge_base>\n${knowledgeBaseContent}\n</knowledge_base>\n\nAnd now, follow these instructions:\n${finalPrompt}`;
+            }
+            return `${finalPrompt}\n\n## Current Project State:\n${JSON.stringify(state, null, 2)}`;
+        }
+
+        function updateReportOutput(content, isEditable = false) {
+            if (isEditable) {
+                elements.reportOutput.innerHTML = `<textarea id="editor" class="w-full h-full bg-yellow-50 border-2 border-yellow-400 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-yellow-500">${content}</textarea>`;
+            } else {
+                elements.reportOutput.innerHTML = marked.parse(content.replace(/\n/g, '<br>'));
+            }
+        }
+
+        function updateKnowledgeBaseStatus(content) {
+            const sizeInKB = content ? (content.length / 1024).toFixed(2) : 0;
+            elements.knowledgeBaseStatus.textContent = content ? `知识库已加载 (${sizeInKB} KB)。` : '知识库为空。';
+            elements.knowledgeBaseStatus.classList.toggle('text-green-600', !!content);
+            elements.knowledgeBaseStatus.classList.toggle('text-gray-500', !content);
+        }
+
+        elements.fileUpload.addEventListener('change', async (event) => {
+            const files = event.target.files;
+            if (!files.length) return;
+            let combinedText = localStorage.getItem('knowledgeBase') || '';
+            log(`正在加载 ${files.length} 个文件...`);
+            for (const file of Array.from(files)) {
+                try {
+                    const text = file.type === 'application/pdf' ? await parsePdf(file) : await file.text();
+                    combinedText += text + '\n\n---\n\n';
+                    log(`✅ 文件 ${file.name} 加载成功。`);
+                } catch (e) {
+                    logError(`处理文件 ${file.name} 失败: ${e.message}`);
+                }
+            }
+            localStorage.setItem('knowledgeBase', combinedText);
+            updateKnowledgeBaseStatus(combinedText);
+        });
+
+        async function parsePdf(file) {
+            const loadingTask = pdfjsLib.getDocument(URL.createObjectURL(file));
+            const pdf = await loadingTask.promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                fullText += textContent.items.map(s => s.str).join(' ') + '\n';
+            }
+            return fullText;
+        }
+
+        elements.clearKnowledgeBase.addEventListener('click', () => {
+            localStorage.removeItem('knowledgeBase');
+            updateKnowledgeBaseStatus(null);
+            log('知识库已清除。');
+        });
+
+        function populatePrompts() {
+            elements.promptsContainer.innerHTML = '';
+            for (const key in PROMPTS) {
+                const promptDiv = document.createElement('div');
+                promptDiv.innerHTML = `
+                    <label for="prompt-${key}" class="block text-sm font-medium text-gray-700 mb-1">${key}</label>
+                    <textarea id="prompt-${key}" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows="8">${PROMPTS[key]}</textarea>
+                `;
+                elements.promptsContainer.appendChild(promptDiv);
+            }
+        }
+        
+        function getCurrentPrompts() {
+            const currentPrompts = {};
+            for (const key in PROMPTS) {
+                currentPrompts[key] = document.getElementById(`prompt-${key}`).value.replace(/\[FIELD\]/g, researchField.trim());
+            }
+            return currentPrompts;
+        }
+
+        const defaultModels = {
+            main: [
+                { group: "Google Gemini (原生)", models: ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest"] },
+                { group: "OpenAI (通过 OpenRouter)", models: ["openai/gpt-4o"] },
+                { group: "Anthropic (通过 OpenRouter)", models: ["anthropic/claude-3.5-sonnet", "anthropic/claude-3-opus"] },
+                { group: "Meta (通过 OpenRouter)", models: ["meta-llama/llama-3.1-405b-instruct"] },
+                { group: "硅基流动 (Moonshot AI)", models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"] }
+            ],
+            knowledge: [
+                { group: "Google Gemini (原生)", models: ["gemini-1.5-flash-latest"] },
+                { group: "OpenRouter (经济型)", models: ["anthropic/claude-3-haiku", "mistralai/mistral-7b-instruct"] },
+                { group: "硅基流动 (Moonshot AI)", models: ["moonshot-v1-8k"] }
+            ]
+        };
+
+        function populateModelSelect(selectElement, modelGroups) {
+            selectElement.innerHTML = '';
+            modelGroups.forEach(group => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = group.group;
+                group.models.forEach(modelId => {
+                    const option = document.createElement('option');
+                    option.value = modelId;
+                    option.textContent = modelId.split('/').pop(); // Display cleaner name
+                    optgroup.appendChild(option);
+                });
+                selectElement.appendChild(optgroup);
+            });
+        }
+        
+        async function fetchAndUpdateModels() {
+            const apiKey = elements.apiKey.value.trim();
+            const apiBaseUrl = elements.apiBaseUrl.value.trim();
+            if (!apiBaseUrl || !apiKey) {
+                populateModelSelect(elements.mainLlm, defaultModels.main);
+                populateModelSelect(elements.knowledgeLlm, defaultModels.knowledge);
+                return;
+            }
+
+            log(`正在从 ${apiBaseUrl} 获取模型列表...`);
+            elements.mainLlm.innerHTML = `<option>正在获取...</option>`;
+            elements.knowledgeLlm.innerHTML = `<option>正在获取...</option>`;
+
+            try {
+                const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/models`, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
+                const data = await response.json();
+                const fetchedModels = data.data.map(m => m.id);
+                
+                const modelGroups = [{ group: "Fetched Models", models: fetchedModels }];
+                populateModelSelect(elements.mainLlm, modelGroups);
+                populateModelSelect(elements.knowledgeLlm, modelGroups);
+                log(`✅ 成功获取 ${fetchedModels.length} 个模型。`);
+            } catch (error) {
+                logError(error.message);
+                elements.mainLlm.innerHTML = `<option>获取失败</option>`;
+                elements.knowledgeLlm.innerHTML = `<option>获取失败</option>`;
+                populateModelSelect(elements.mainLlm, defaultModels.main);
+                populateModelSelect(elements.knowledgeLlm, defaultModels.knowledge);
+            }
+        }
+
+        elements.apiBaseUrl.addEventListener('blur', fetchAndUpdateModels);
+        
+        elements.tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                elements.tabButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                elements.tabContents.forEach(content => content.classList.add('hidden'));
+                document.getElementById(`tab-${button.dataset.tab}`).classList.remove('hidden');
+            });
+        });
+
+        const workflowSteps = [
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 0: 识别研究领域...");
+                const fieldPrompt = `From the following research idea, extract the primary academic field in 1-3 words. For example, for "我想研究蛋白质X和疾病Y之间的关系...", the field is "分子生物学". Research Idea: "${elements.initialPrompt.value}". Field:`;
+                researchField = await callLlm(fieldPrompt, mainLlm, apiKey, apiBaseUrl);
+                log(`✅ 识别领域为: ${researchField.trim()}`);
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 1: 执行 '目标澄清'...");
+                const prompt = getPromptWithState(getCurrentPrompts().clarify_objectives, { initial_prompt: graphState.initial_prompt });
+                graphState.clarified_objectives = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                updateReportOutput(`### 目标、内容与关键科学问题\n\n${graphState.clarified_objectives}`);
+                log("✅ '目标澄清' 完成。请确认后继续。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 2: 执行 '文献综述'...");
+                const prompt = getPromptWithState(getCurrentPrompts().literature_review, graphState, localStorage.getItem('knowledgeBase'));
+                graphState.literature_review_draft = await callLlm(prompt, knowledgeLlm, apiKey, apiBaseUrl);
+                updateReportOutput(`### 立论依据 (文献综述)\n\n${graphState.literature_review_draft}`);
+                log("✅ '文献综述' 完成。请确认后继续。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 3: 执行 '研究计划'...");
+                const prompt = getPromptWithState(getCurrentPrompts().research_plan, graphState);
+                graphState.research_plan_draft = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                updateReportOutput(`### 研究方案\n\n${graphState.research_plan_draft}`);
+                log("✅ '研究计划' 完成。请确认后继续。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 4: 执行 '创新点'...");
+                const prompt = getPromptWithState(getCurrentPrompts().innovation, graphState);
+                graphState.innovation_draft = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                updateReportOutput(`### 本项目的特色与创新之处\n\n${graphState.innovation_draft}`);
+                log("✅ '创新点' 完成。请确认后继续。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 5: 执行 'AI评审'...");
+                const fullDraft = `立论依据:\n${graphState.literature_review_draft}\n\n研究方案:\n${graphState.research_plan_draft}\n\n创新之处:\n${graphState.innovation_draft}`;
+                const prompt = getPromptWithState(getCurrentPrompts().reviewer, { full_draft: fullDraft });
+                graphState.review_feedback = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                const combinedReport = `${fullDraft}\n\n---\n\n### AI 评审员意见\n\n${graphState.review_feedback}`;
+                updateReportOutput(combinedReport, true);
+                log("✅ 'AI评审' 完成。请直接修改上方草稿，然后点击“提交修改并启动优化”。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 6: 执行 '修订优化'...");
+                const userDrafts = document.getElementById('editor').value;
+                let prompt = getCurrentPrompts().reviser.replace('[REVIEW_FEEDBACK]', graphState.review_feedback).replace('[USER_DRAFTS]', userDrafts);
+                const revisedText = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                graphState.literature_review_draft = revisedText;
+                graphState.research_plan_draft = '';
+                graphState.innovation_draft = '';
+                updateReportOutput(`### 修订后版本\n\n${revisedText}`, true); // Keep it editable
+                log("✅ '修订优化' 完成。您可以继续修改并优化，或点击“完成修订”。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 7: 执行 '标题和摘要'...");
+                const prompt = getPromptWithState(getCurrentPrompts().title_abstract, graphState);
+                const jsonStr = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                try {
+                    const jsonMatch = jsonStr.match(/```json\n([\s\S]*?)\n```/);
+                    const parsed = JSON.parse(jsonMatch ? jsonMatch[1] : jsonStr);
+                    graphState.final_title = parsed.title;
+                    graphState.final_abstract = parsed.abstract;
+                } catch(e) {
+                    graphState.final_title = "未能生成标题";
+                    graphState.final_abstract = jsonStr;
+                }
+                updateReportOutput(`<h2>${graphState.final_title}</h2>\n\n<h3>摘要</h3>\n\n<p>${graphState.final_abstract}</p>`);
+                log("✅ '标题和摘要' 完成。请确认后继续。");
+            },
+            async (apiKey, mainLlm, knowledgeLlm, apiBaseUrl) => {
+                log("步骤 8: 执行 '技术路线图'...");
+                document.querySelector('[data-tab="roadmap"]').click();
+                const researchContent = `研究内容:\n${graphState.literature_review_draft}\n\n研究方案:\n${graphState.research_plan_draft}`;
+                let prompt = getCurrentPrompts().technical_roadmap.replace('[RESEARCH_CONTENT]', researchContent);
+                const svgCode = await callLlm(prompt, mainLlm, apiKey, apiBaseUrl);
+                elements.roadmapOutput.innerHTML = svgCode;
+                log("✅ '技术路线图' 完成。");
+            }
+        ];
+
+        async function runWorkflow() {
+            const { apiKey, mainLlm, knowledgeLlm, apiBaseUrl } = {
+                apiKey: elements.apiKey.value.trim(),
+                mainLlm: elements.mainLlm.value,
+                knowledgeLlm: elements.knowledgeLlm.value,
+                apiBaseUrl: elements.apiBaseUrl.value.trim()
+            };
+            
+            if (!apiKey || (!elements.initialPrompt.value.trim() && currentStep === 0)) {
+                logError("错误：API密钥和研究构想不能为空。");
+                return;
+            }
+
+            toggleLoading(true, '确认并继续');
+            
+            try {
+                await workflowSteps[currentStep](apiKey, mainLlm, knowledgeLlm, apiBaseUrl);
+                
+                if (currentStep === 5) { // Just finished AI Review
+                    currentStep = 6; // Set state to be ready for revision
+                    toggleLoading(false);
+                    elements.workflowButton.classList.add('hidden');
+                    elements.revisionControls.classList.remove('hidden');
+                } else {
+                    currentStep++;
+                    if (currentStep < workflowSteps.length) {
+                        toggleLoading(false, '确认并继续');
+                    } else {
+                        log("🎉 全部流程已完成！");
+                        toggleLoading(false, '流程结束');
+                        elements.workflowButton.disabled = true;
+                    }
+                }
+            } catch (error) {
+                logError(`工作流程在步骤 ${currentStep} 中断: ${error.message}`);
+                toggleLoading(false, '流程失败，请重试');
+            }
+        }
+        
+        elements.workflowButton.addEventListener('click', () => {
+             if (currentStep === 0) {
+                graphState = { initial_prompt: elements.initialPrompt.value.trim() };
+             }
+             runWorkflow();
+        });
+
+        elements.reviseButton.addEventListener('click', async () => {
+            const { apiKey, mainLlm, apiBaseUrl } = {
+                apiKey: elements.apiKey.value.trim(),
+                mainLlm: elements.mainLlm.value,
+                apiBaseUrl: elements.apiBaseUrl.value.trim()
+            };
+            elements.reviseButton.disabled = true;
+            elements.finishRevisionButton.disabled = true;
+            log("⚙️ 正在根据您的修改进行新一轮优化...");
+
+            try {
+                await workflowSteps[6](apiKey, mainLlm, null, apiBaseUrl);
+            } catch (error) {
+                logError(`修订优化失败: ${error.message}`);
+            } finally {
+                elements.reviseButton.disabled = false;
+                elements.finishRevisionButton.disabled = false;
+            }
+        });
+        
+        elements.finishRevisionButton.addEventListener('click', () => {
+            elements.revisionControls.classList.add('hidden');
+            elements.workflowButton.classList.remove('hidden');
+            currentStep = 7; 
+            // Before moving on, save the final edited text to graphState
+            const finalEditorContent = document.getElementById('editor')?.value;
+            if (finalEditorContent) {
+                 graphState.literature_review_draft = finalEditorContent; 
+                 // A more robust solution would parse the sections, but this is a simple approximation
+            }
+            runWorkflow();
+        });
+
+        window.onload = () => {
+            populatePrompts();
+            updateKnowledgeBaseStatus(localStorage.getItem('knowledgeBase'));
+            fetchAndUpdateModels(); // Initial model population
+        };
+
+    </script>
+</body>
+</html>
